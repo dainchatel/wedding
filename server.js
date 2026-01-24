@@ -3,11 +3,24 @@ const express = require('express');
 const session = require('express-session');
 const app = express();
 
+// Trust proxy for Heroku (required to detect HTTPS)
+app.set('trust proxy', 1);
+
 const PORT = process.env.PORT || 3000;
 const PASSWORD = process.env.WEDDING_PASSWORD || 'changeme';
 
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
+
+// Redirect HTTP to HTTPS in production
+if (process.env.NODE_ENV === 'production') {
+  app.use((req, res, next) => {
+    if (req.get('x-forwarded-proto') !== 'https') {
+      return res.redirect(`https://${req.get('host')}${req.url}`);
+    }
+    next();
+  });
+}
 
 // Disable caching in development for hot reloading
 if (process.env.NODE_ENV !== 'production') {
@@ -119,7 +132,13 @@ app.get('/', (req, res) => {
 app.post('/login', (req, res) => {
   if (req.body.password === PASSWORD) {
     req.session.authenticated = true;
-    res.redirect('/wedding');
+    // Save session before redirecting (required for secure cookies on Heroku)
+    req.session.save((err) => {
+      if (err) {
+        return res.redirect('/?error=1');
+      }
+      res.redirect('/wedding');
+    });
   } else {
     res.redirect('/?error=1');
   }
