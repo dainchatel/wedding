@@ -210,7 +210,6 @@ app.get('/wedding', requireAuth, (req, res) => {
       <h1>WEDDING</h1>
       <div class="date-location">OCTOBER 10, 2026 - BROOKLYN, NY</div>
       <img src="/IMG_8784.JPG" alt="Wedding">
-      <div class="details">Details to follow</div>
     </body>
     </html>
   `);
