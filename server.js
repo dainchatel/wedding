@@ -185,8 +185,33 @@ app.get('/wedding', requireAuth, (req, res) => {
           font-size: 24px;
           font-weight: 400;
           color: #666;
-          margin-bottom: 50px;
           letter-spacing: 1px;
+        }
+        .date-location:first-of-type {
+          margin-bottom: 4px;
+        }
+        .date-location:last-of-type {
+          margin-bottom: 28px;
+        }
+        .address-link {
+          display: inline-block;
+          max-width: 280px;
+          margin-bottom: 50px;
+          padding: 10px 20px;
+          font-size: 22px;
+          font-weight: 400;
+          color: white;
+          letter-spacing: 1px;
+          text-decoration: none;
+          text-align: center;
+          background: #333;
+          border: 1px solid #333;
+          transition: color 0.2s, border-color 0.2s, background 0.2s;
+        }
+        .address-link:hover {
+          color: white;
+          background: #555;
+          border-color: #555;
         }
         img {
           max-width: 80%;
@@ -208,8 +233,10 @@ app.get('/wedding', requireAuth, (req, res) => {
     </head>
     <body>
       <h1>WEDDING</h1>
-      <div class="date-location">OCTOBER 10, 2026 - BROOKLYN, NY</div>
       <img src="/IMG_8784.JPG" alt="Wedding">
+      <div class="date-location">OCTOBER 10, 2026</div> 
+      <div class="date-location">BROOKLYN, NY</div>
+      <a class="address-link" href="https://forms.gle/WpyXCv8UxbXMi1Te7" target="_blank" rel="noopener noreferrer">Click here to share your address</a>
     </body>
     </html>
   `);
