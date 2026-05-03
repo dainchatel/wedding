@@ -1,6 +1,7 @@
 require('dotenv').config();
 const express = require('express');
 const session = require('express-session');
+const db = require('./db');
 const app = express();
 
 // Trust proxy for Heroku (required to detect HTTPS)
@@ -8,6 +9,7 @@ app.set('trust proxy', 1);
 
 const PORT = process.env.PORT || 3000;
 const PASSWORD = process.env.WEDDING_PASSWORD || 'changeme';
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'admin';
 
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
@@ -43,11 +45,13 @@ app.use(session({
   }
 }));
 
-// Check if user is authenticated
 const requireAuth = (req, res, next) => {
-  if (req.session.authenticated) {
-    return next();
-  }
+  if (req.session.authenticated) return next();
+  res.redirect('/');
+};
+
+const requireAdmin = (req, res, next) => {
+  if (req.session.isAdmin) return next();
   res.redirect('/');
 };
 
@@ -131,18 +135,20 @@ app.get('/', (req, res) => {
 
 // Handle login
 app.post('/login', (req, res) => {
-  if (req.body.password === PASSWORD) {
+  const { password } = req.body;
+  if (password === ADMIN_PASSWORD) {
     req.session.authenticated = true;
-    // Save session before redirecting (required for secure cookies on Heroku)
-    req.session.save((err) => {
-      if (err) {
-        return res.redirect('/?error=1');
-      }
-      res.redirect('/wedding');
-    });
+    req.session.isAdmin = true;
+  } else if (password === PASSWORD) {
+    req.session.authenticated = true;
+    req.session.isAdmin = false;
   } else {
-    res.redirect('/?error=1');
+    return res.redirect('/?error=1');
   }
+  req.session.save((err) => {
+    if (err) return res.redirect('/?error=1');
+    res.redirect(req.session.isAdmin ? '/admin' : '/wedding');
+  });
 });
 
 // Protected wedding page
@@ -229,17 +235,475 @@ app.get('/wedding', requireAuth, (req, res) => {
           font-style: italic;
           letter-spacing: 0.5px;
         }
+        .rsvp {
+          width: 100%;
+          max-width: 480px;
+          margin-bottom: 50px;
+          font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+          color: #333;
+        }
+        .rsvp form { display: flex; flex-direction: column; gap: 12px; }
+        .rsvp label { font-size: 14px; color: #555; display: flex; flex-direction: column; gap: 6px; }
+        .rsvp input, .rsvp select {
+          padding: 10px 12px; font-size: 15px; border: 1px solid #ddd; border-radius: 6px; outline: none; background: white;
+        }
+        .rsvp input:focus, .rsvp select:focus { border-color: #888; }
+        .rsvp button {
+          padding: 10px 18px; font-size: 15px; background: #333; color: white;
+          border: 1px solid #333; border-radius: 6px; cursor: pointer;
+        }
+        .rsvp button:hover { background: #555; border-color: #555; }
+        .rsvp button.secondary { background: white; color: #333; }
+        .rsvp button.secondary:hover { background: #f5f5f5; }
+        .rsvp .actions { display: flex; flex-wrap: wrap; gap: 8px; }
+        .rsvp p { font-size: 16px; margin-bottom: 12px; line-height: 1.5; }
+        .rsvp fieldset {
+          border: 1px solid #eee; border-radius: 6px; padding: 16px; display: flex; flex-direction: column; gap: 12px;
+        }
+        .rsvp legend { padding: 0 8px; font-size: 14px; color: #666; }
+        .rsvp .success { font-size: 20px; text-align: center; color: #333; }
       </style>
     </head>
     <body>
       <h1>WEDDING</h1>
       <img src="/IMG_8784.JPG" alt="Wedding">
-      <div class="date-location">OCTOBER 10, 2026</div> 
+      <div class="date-location">OCTOBER 10, 2026</div>
       <div class="date-location">BROOKLYN, NY</div>
-      <a class="address-link" href="https://forms.gle/WpyXCv8UxbXMi1Te7" target="_blank" rel="noopener noreferrer">Click here to share your address</a>
+      <button class="address-link" id="rsvp-trigger" onclick="startRsvp()">RSVP</button>
+
+      <div class="rsvp" id="rsvp-section" hidden>
+        <div class="stage" id="stage-search">
+          <form onsubmit="searchRsvp(event)">
+            <label>Enter your full name or email</label>
+            <input id="rsvp-query" name="query" required autocomplete="off">
+            <button type="submit">Look up</button>
+          </form>
+        </div>
+        <div class="stage" id="stage-results" hidden></div>
+        <div class="stage" id="stage-form" hidden></div>
+        <div class="stage" id="stage-success" hidden>
+          <p class="success">Thanks for RSVPing!</p>
+        </div>
+      </div>
+
+      <script>
+        const stages = ['search', 'results', 'form', 'success'];
+        function showStage(s) {
+          for (const stage of stages) {
+            document.getElementById('stage-' + stage).hidden = stage !== s;
+          }
+        }
+        function startRsvp() {
+          document.getElementById('rsvp-trigger').hidden = true;
+          document.getElementById('rsvp-section').hidden = false;
+          showStage('search');
+          document.getElementById('rsvp-query').focus();
+        }
+        function escapeHtml(s) {
+          return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+        }
+        async function searchRsvp(e) {
+          e.preventDefault();
+          const query = document.getElementById('rsvp-query').value;
+          const r = await fetch('/api/rsvp/search', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ query })
+          });
+          const { matches } = await r.json();
+          renderResults(matches);
+          showStage('results');
+        }
+        function renderResults(matches) {
+          const c = document.getElementById('stage-results');
+          if (!matches.length) {
+            c.innerHTML = '<p>We couldn\\'t find you. Please check the spelling.</p><button onclick="showStage(\\'search\\')">Try again</button>';
+            return;
+          }
+          if (matches.length === 1) {
+            const m = matches[0];
+            c.innerHTML = '<p>We found: <strong>' + escapeHtml(m.full_name) + '</strong>. Is this you?</p>'
+              + '<div class="actions"><button onclick="loadRsvp(' + m.id + ')">Yes, continue</button>'
+              + '<button class="secondary" onclick="showStage(\\'search\\')">No, search again</button></div>';
+            return;
+          }
+          c.innerHTML = '<p>Multiple matches found. Please pick:</p><div class="actions">'
+            + matches.map(m => '<button onclick="loadRsvp(' + m.id + ')">' + escapeHtml(m.full_name) + '</button>').join('')
+            + '</div><button class="secondary" onclick="showStage(\\'search\\')">Search again</button>';
+        }
+        async function loadRsvp(id) {
+          const r = await fetch('/api/rsvp/' + id);
+          const data = await r.json();
+          renderForm(data);
+          showStage('form');
+        }
+        function personHtml(p, prefix) {
+          const firstName = p.full_name.split(' ')[0];
+          return '<fieldset><legend>' + escapeHtml(p.full_name) + '</legend>'
+            + '<label>Will ' + escapeHtml(firstName) + ' attend?'
+            + '<select name="' + prefix + '-attending" required>'
+            + '<option value="">--</option>'
+            + '<option value="1"' + (p.attending === 1 ? ' selected' : '') + '>Yes</option>'
+            + '<option value="0"' + (p.attending === 0 ? ' selected' : '') + '>No</option>'
+            + '</select></label>'
+            + '<label>Dietary restrictions<input name="' + prefix + '-dietary" value="' + escapeHtml(p.dietary_restrictions) + '"></label>'
+            + '<input type="hidden" name="' + prefix + '-id" value="' + p.id + '"></fieldset>';
+        }
+        function renderForm({ primary, linked }) {
+          const c = document.getElementById('stage-form');
+          c.innerHTML = '<form onsubmit="submitRsvp(event)">'
+            + personHtml(primary, 'p')
+            + (linked ? personHtml(linked, 'l') : '')
+            + '<button type="submit">Submit RSVP</button></form>';
+        }
+        async function submitRsvp(e) {
+          e.preventDefault();
+          const fd = new FormData(e.target);
+          const entries = [{
+            id: Number(fd.get('p-id')),
+            attending: fd.get('p-attending'),
+            dietary_restrictions: fd.get('p-dietary')
+          }];
+          if (fd.get('l-id')) {
+            entries.push({
+              id: Number(fd.get('l-id')),
+              attending: fd.get('l-attending'),
+              dietary_restrictions: fd.get('l-dietary')
+            });
+          }
+          await fetch('/api/rsvp/submit', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ entries })
+          });
+          showStage('success');
+        }
+      </script>
     </body>
     </html>
   `);
+});
+
+const escapeHtml = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({
+  '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+})[c]);
+
+const cleanEmail = (e) => {
+  if (!e) return e;
+  const m = e.match(/^\[([^\]]+)\]\(mailto:[^)]+\)$/);
+  return (m ? m[1] : e).trim();
+};
+
+const parseCsv = (text) => {
+  return text.split(/\r?\n/)
+    .map(line => line.trim())
+    .filter(Boolean)
+    .map(line => {
+      const parts = line.split(',').map(p => p.trim());
+      return { full_name: parts[0] || '', email: cleanEmail(parts[1] || '') };
+    })
+    .filter(row => row.full_name);
+};
+
+// Admin route
+app.get('/admin', requireAdmin, (req, res) => {
+  const guests = db.prepare('SELECT * FROM rsvp').all().sort((a, b) =>
+    a.full_name.localeCompare(b.full_name, undefined, { sensitivity: 'base' })
+  );
+
+  const sortedGuests = guests;
+  const guestOptions = (currentId, selectedId) => sortedGuests
+    .filter(g => g.id !== currentId)
+    .map(g =>
+      `<option value="${g.id}"${g.id === selectedId ? ' selected' : ''}>${escapeHtml(g.full_name)}</option>`
+    ).join('');
+
+  const attendingOptions = (v) => `
+    <option value=""${v === null ? ' selected' : ''}>—</option>
+    <option value="1"${v === 1 ? ' selected' : ''}>Yes</option>
+    <option value="0"${v === 0 ? ' selected' : ''}>No</option>
+  `;
+
+  const saveForm = `<form id="save-all" method="POST" action="/admin/guests/save"></form>`;
+  const deleteForms = guests.map(g =>
+    `<form id="del-${g.id}" method="POST" action="/admin/guests/${g.id}/delete"></form>`
+  ).join('');
+
+  const trash = `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2"/></svg>`;
+
+  const rows = guests.map(g => `
+    <tr>
+      <td>${g.id}</td>
+      <td><input form="save-all" name="g[r${g.id}][full_name]" value="${escapeHtml(g.full_name)}" required></td>
+      <td><input form="save-all" name="g[r${g.id}][email]" type="email" value="${escapeHtml(g.email)}"></td>
+      <td><input form="save-all" name="g[r${g.id}][dietary_restrictions]" value="${escapeHtml(g.dietary_restrictions)}"></td>
+      <td>
+        <select form="save-all" name="g[r${g.id}][can_also_rsvp_for]">
+          <option value=""${g.can_also_rsvp_for ? '' : ' selected'}>— none —</option>
+          ${guestOptions(g.id, g.can_also_rsvp_for)}
+        </select>
+      </td>
+      <td>
+        <select form="save-all" name="g[r${g.id}][attending]">${attendingOptions(g.attending)}</select>
+      </td>
+      <td>${g.created_at}</td>
+      <td class="actions">
+        <button form="del-${g.id}" type="submit" class="icon-btn delete" title="Delete ${escapeHtml(g.full_name)}"
+          onclick="return confirm('Delete ${escapeHtml(g.full_name)}?')">${trash}</button>
+      </td>
+    </tr>
+  `).join('');
+
+  res.send(`
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+      <meta charset="UTF-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1.0">
+      <title>Guest Admin</title>
+      <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; padding: 40px; background: #f9f9f9; color: #333; }
+        h1 { font-size: 24px; margin-bottom: 8px; }
+        h2 { font-size: 18px; margin-bottom: 12px; margin-top: 32px; }
+        .count { font-size: 14px; color: #888; margin-bottom: 24px; }
+        table { width: 100%; border-collapse: collapse; background: white; border-radius: 8px; overflow: hidden; box-shadow: 0 1px 4px rgba(0,0,0,0.08); }
+        th { background: #333; color: white; text-align: left; padding: 12px 16px; font-size: 13px; font-weight: 500; }
+        td { padding: 8px 12px; border-bottom: 1px solid #eee; font-size: 13px; color: #444; vertical-align: middle; }
+        tr:last-child td { border-bottom: none; }
+        td input, td select { padding: 6px 8px; font-size: 13px; border: 1px solid #ddd; border-radius: 4px; outline: none; width: 100%; background: white; }
+        td input:focus, td select:focus { border-color: #999; }
+        td.actions { white-space: nowrap; display: flex; gap: 6px; }
+        .empty { text-align: center; padding: 40px; color: #aaa; font-size: 14px; }
+        form.bulk { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 1px 4px rgba(0,0,0,0.08); display: flex; flex-direction: column; gap: 12px; }
+        form.bulk label { font-size: 12px; color: #666; }
+        form.bulk textarea { padding: 10px; font-size: 13px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; border: 1px solid #ddd; border-radius: 4px; outline: none; min-height: 140px; resize: vertical; }
+        form.bulk textarea:focus { border-color: #999; }
+        button { padding: 6px 12px; font-size: 13px; background: #333; color: white; border: none; border-radius: 4px; cursor: pointer; align-self: flex-start; }
+        button:hover { background: #555; }
+        button.icon-btn { background: transparent; color: #888; padding: 4px; display: inline-flex; align-items: center; justify-content: center; border-radius: 4px; }
+        button.icon-btn:hover { background: #fbe9e7; color: #c62828; }
+        .save-bar { position: sticky; bottom: 0; background: #f9f9f9; padding: 16px 0; margin-top: 16px; display: flex; justify-content: flex-end; }
+        .save-bar button { padding: 10px 20px; font-size: 14px; }
+      </style>
+    </head>
+    <body>
+      ${saveForm}
+      ${deleteForms}
+      <h1>Guest Admin</h1>
+      <div class="count">${guests.length} guest${guests.length !== 1 ? 's' : ''}</div>
+
+      <h2>Bulk Add (CSV)</h2>
+      <form class="bulk" method="POST" action="/admin/guests/bulk">
+        <label>One guest per line, format: <code>Full Name, email</code> (email optional)</label>
+        <textarea name="csv" placeholder="Jane Doe, jane@example.com&#10;John Smith, john@example.com&#10;Mary Anne Smith,"></textarea>
+        <button type="submit">Add Guests</button>
+      </form>
+
+      <h2>Guests</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>Full Name</th>
+            <th>Email</th>
+            <th>Dietary</th>
+            <th>Can Also RSVP For</th>
+            <th>Attending</th>
+            <th>Created</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          ${rows || '<tr><td colspan="8" class="empty">No guests yet</td></tr>'}
+        </tbody>
+      </table>
+
+      ${guests.length ? '<div class="save-bar"><button form="save-all" type="submit">Save All Changes</button></div>' : ''}
+
+      <script>
+        const linkSelects = document.querySelectorAll('select[name$="[can_also_rsvp_for]"]');
+        const prev = new Map();
+        const findSel = (rowId) => document.querySelector('select[name="g[r' + rowId + '][can_also_rsvp_for]"]');
+        const rowIdOf = (sel) => sel.name.match(/g\\[r(\\d+)\\]/)[1];
+
+        linkSelects.forEach(sel => {
+          prev.set(sel, sel.value);
+          sel.addEventListener('change', () => {
+            const rowId = rowIdOf(sel);
+            const oldVal = prev.get(sel);
+            const newVal = sel.value;
+
+            if (oldVal) {
+              const oldPartner = findSel(oldVal);
+              if (oldPartner && oldPartner.value === rowId) {
+                oldPartner.value = '';
+                prev.set(oldPartner, '');
+              }
+            }
+            if (newVal) {
+              const newPartner = findSel(newVal);
+              if (newPartner) {
+                const displaced = newPartner.value;
+                if (displaced && displaced !== rowId) {
+                  const displacedSel = findSel(displaced);
+                  if (displacedSel) {
+                    displacedSel.value = '';
+                    prev.set(displacedSel, '');
+                  }
+                }
+                newPartner.value = rowId;
+                prev.set(newPartner, rowId);
+              }
+            }
+            prev.set(sel, newVal);
+          });
+        });
+      </script>
+    </body>
+    </html>
+  `);
+});
+
+app.post('/admin/guests/bulk', requireAdmin, (req, res) => {
+  const rows = parseCsv(req.body.csv || '');
+  const existing = db.prepare('SELECT full_name FROM rsvp').all();
+  const seen = new Set(existing.map(g => g.full_name.toLowerCase().trim()));
+  const insert = db.prepare(`INSERT INTO rsvp (full_name, email) VALUES (?, ?)`);
+  const tx = db.transaction((rows) => {
+    for (const { full_name, email } of rows) {
+      const key = full_name.toLowerCase().trim();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      insert.run(full_name, email || null);
+    }
+  });
+  tx(rows);
+  res.redirect('/admin');
+});
+
+app.post('/admin/guests/save', requireAdmin, (req, res) => {
+  const g = req.body.g || {};
+  const existingIds = new Set(db.prepare('SELECT id FROM rsvp').all().map(r => r.id));
+  const validLink = (v) => {
+    if (!v) return null;
+    const n = Number(v);
+    return existingIds.has(n) ? n : null;
+  };
+  const update = db.prepare(`
+    UPDATE rsvp
+    SET full_name = ?, email = ?, dietary_restrictions = ?, can_also_rsvp_for = ?, attending = ?
+    WHERE id = ?
+  `);
+  const setLink = db.prepare('UPDATE rsvp SET can_also_rsvp_for = ? WHERE id = ?');
+  const stripPrefix = (key) => key.startsWith('r') ? key.slice(1) : key;
+  const entries = Object.entries(g).map(([k, v]) => [stripPrefix(k), v]);
+  const tx = db.transaction(() => {
+    for (const [id, fields] of entries) {
+      if (!fields.full_name) continue;
+      if (!existingIds.has(Number(id))) continue;
+      update.run(
+        fields.full_name.trim(),
+        fields.email?.trim() || null,
+        fields.dietary_restrictions?.trim() || null,
+        validLink(fields.can_also_rsvp_for),
+        fields.attending === '' || fields.attending == null ? null : Number(fields.attending),
+        Number(id)
+      );
+    }
+    // Mirror non-null links so pairings are always symmetric
+    for (const [id, fields] of entries) {
+      const partnerId = validLink(fields.can_also_rsvp_for);
+      if (partnerId && existingIds.has(Number(id))) {
+        setLink.run(Number(id), partnerId);
+      }
+    }
+  });
+  tx();
+  res.redirect('/admin');
+});
+
+app.post('/admin/guests/:id/delete', requireAdmin, (req, res) => {
+  db.prepare('DELETE FROM rsvp WHERE id = ?').run(Number(req.params.id));
+  res.redirect('/admin');
+});
+
+// RSVP API
+const normalize = (s) => String(s ?? '').toLowerCase().replace(/\s+/g, ' ').trim();
+
+const levenshtein = (a, b) => {
+  if (a === b) return 0;
+  if (!a.length) return b.length;
+  if (!b.length) return a.length;
+  const dp = Array.from({ length: b.length + 1 }, (_, i) => i);
+  for (let i = 1; i <= a.length; i++) {
+    let prev = dp[0];
+    dp[0] = i;
+    for (let j = 1; j <= b.length; j++) {
+      const tmp = dp[j];
+      dp[j] = a[i - 1] === b[j - 1] ? prev : Math.min(prev, dp[j - 1], dp[j]) + 1;
+      prev = tmp;
+    }
+  }
+  return dp[b.length];
+};
+
+app.post('/api/rsvp/search', requireAuth, (req, res) => {
+  const query = normalize(req.body.query);
+  if (!query) return res.json({ matches: [] });
+  const guests = db.prepare('SELECT id, full_name, email FROM rsvp').all();
+
+  const emailMatch = guests.find(g => g.email && normalize(g.email) === query);
+  if (emailMatch) {
+    return res.json({ matches: [{ id: emailMatch.id, full_name: emailMatch.full_name }] });
+  }
+
+  const exact = guests.filter(g => normalize(g.full_name) === query);
+  if (exact.length) {
+    return res.json({ matches: exact.map(g => ({ id: g.id, full_name: g.full_name })) });
+  }
+
+  const fuzzy = guests
+    .map(g => ({ g, d: levenshtein(normalize(g.full_name), query) }))
+    .filter(x => x.d <= 2)
+    .sort((a, b) => a.d - b.d);
+
+  if (!fuzzy.length) return res.json({ matches: [] });
+  const best = fuzzy[0].d;
+  return res.json({
+    matches: fuzzy.filter(x => x.d === best).map(x => ({ id: x.g.id, full_name: x.g.full_name }))
+  });
+});
+
+app.get('/api/rsvp/:id', requireAuth, (req, res) => {
+  const id = Number(req.params.id);
+  const primary = db.prepare(
+    'SELECT id, full_name, dietary_restrictions, attending, can_also_rsvp_for FROM rsvp WHERE id = ?'
+  ).get(id);
+  if (!primary) return res.status(404).json({ error: 'not found' });
+  let linked = null;
+  if (primary.can_also_rsvp_for) {
+    linked = db.prepare(
+      'SELECT id, full_name, dietary_restrictions, attending FROM rsvp WHERE id = ?'
+    ).get(primary.can_also_rsvp_for);
+  }
+  res.json({ primary, linked });
+});
+
+app.post('/api/rsvp/submit', requireAuth, (req, res) => {
+  const { entries } = req.body;
+  if (!Array.isArray(entries) || !entries.length) {
+    return res.status(400).json({ error: 'invalid' });
+  }
+  const update = db.prepare('UPDATE rsvp SET attending = ?, dietary_restrictions = ? WHERE id = ?');
+  const tx = db.transaction((items) => {
+    for (const { id, attending, dietary_restrictions } of items) {
+      const a = attending === '' || attending == null ? null : Number(attending);
+      update.run(a, dietary_restrictions?.trim() || null, Number(id));
+    }
+  });
+  tx(entries);
+  res.json({ ok: true });
 });
 
 // Logout route (optional, for testing)
