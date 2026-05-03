@@ -331,7 +331,7 @@ app.get('/wedding', requireAuth, ah(async (req, res) => {
         function renderResults(matches) {
           const c = document.getElementById('stage-results');
           if (!matches.length) {
-            c.innerHTML = '<p>We couldn\\'t find you. Please check the spelling.</p><button onclick="showStage(\\'search\\')">Try again</button>';
+            c.innerHTML = '<p>We couldn\\'t find you. Please check the spelling.</p><div class="actions"><button onclick="showStage(\\'search\\')">Try again</button></div>';
             return;
           }
           if (matches.length === 1) {
