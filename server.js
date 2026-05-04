@@ -267,6 +267,7 @@ app.get('/wedding', requireAuth, ah(async (req, res) => {
         .rsvp {
           width: 100%;
           max-width: 480px;
+          margin-top: 24px;
           margin-bottom: 50px;
           font-family: 'Lato', sans-serif;
           color: #333;
@@ -342,7 +343,7 @@ app.get('/wedding', requireAuth, ah(async (req, res) => {
         }
         .gift-btn.primary:hover { background: #555; border-color: #555; }
 @media (max-width: 480px) {
-          body { padding: 32px 16px; }
+          body { padding: 32px 24px; }
           img { max-width: 100%; }
           .rsvp { max-width: 100%; }
           .gifts { max-width: 100%; }
