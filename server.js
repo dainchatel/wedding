@@ -10,6 +10,10 @@ app.set('trust proxy', 1);
 const PORT = process.env.PORT || 3000;
 const PASSWORD = process.env.WEDDING_PASSWORD || 'changeme';
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'admin';
+const STRIPE_LINK = process.env.STRIPE_LINK || '';
+const VENMO_HANDLE = (process.env.VENMO_HANDLE || '').replace('@', '');
+const HOTEL_LINK = process.env.HOTEL_LINK || '';
+const ACCESS_TOKEN = process.env.ACCESS_TOKEN || '';
 
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
@@ -67,7 +71,7 @@ app.get('/', (req, res) => {
       <meta charset="UTF-8">
       <meta name="viewport" content="width=device-width, initial-scale=1.0">
       <title>Wedding</title>
-      <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Cdefs%3E%3ClinearGradient id='goldGrad' x1='0%25' y1='0%25' x2='100%25' y2='100%25'%3E%3Cstop offset='0%25' style='stop-color:%23d4af37;stop-opacity:1' /%3E%3Cstop offset='100%25' style='stop-color:%23f4e4bc;stop-opacity:1' /%3E%3C/linearGradient%3E%3C/defs%3E%3Ccircle cx='50' cy='50' r='45' fill='url(%23goldGrad)'/%3E%3C/svg%3E">
+      <link rel="icon" type="image/png" href="/favicon.png">
       <style>
         * {
           margin: 0;
@@ -84,6 +88,28 @@ app.get('/', (req, res) => {
         }
         .container {
           text-align: center;
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          gap: 36px;
+        }
+        .site-info h1 {
+          font-family: Georgia, 'Times New Roman', serif;
+          font-size: 32px;
+          font-weight: normal;
+          letter-spacing: 2px;
+          color: #333;
+          margin-bottom: 8px;
+        }
+        .site-info p {
+          font-size: 14px;
+          color: #999;
+          letter-spacing: 0.5px;
+        }
+        .site-info .desc {
+          margin-top: 6px;
+          font-size: 13px;
+          color: #bbb;
         }
         form {
           display: flex;
@@ -125,6 +151,10 @@ app.get('/', (req, res) => {
     </head>
     <body>
       <div class="container">
+        <div class="site-info">
+          <h1>Emma &amp; Dain</h1>
+          <p>October 10, 2026 &middot; Brooklyn, NY</p>
+        </div>
         <form method="POST" action="/login">
           <input type="password" name="password" placeholder="Enter password" required autofocus>
           <button type="submit">Enter</button>
@@ -154,10 +184,24 @@ app.post('/login', (req, res) => {
   });
 });
 
+// Token-based bypass for Stripe review / external crawlers
+app.get('/access', (req, res) => {
+  if (!ACCESS_TOKEN || req.query.token !== ACCESS_TOKEN) {
+    return res.redirect('/');
+  }
+  req.session.authenticated = true;
+  req.session.isAdmin = false;
+  req.session.save(() => res.redirect('/wedding'));
+});
+
 // Protected wedding page
 app.get('/wedding', requireAuth, ah(async (req, res) => {
   const setting = await db.get(`SELECT value FROM settings WHERE key = 'rsvp_enabled'`);
   const rsvpEnabled = setting?.value === '1';
+  const giftsSetting = await db.get(`SELECT value FROM settings WHERE key = 'gifts_enabled'`);
+  const giftsEnabled = giftsSetting?.value === '1';
+  const hotelSetting = await db.get(`SELECT value FROM settings WHERE key = 'hotel_enabled'`);
+  const hotelEnabled = hotelSetting?.value === '1';
   res.send(`
     <!DOCTYPE html>
     <html lang="en">
@@ -165,7 +209,7 @@ app.get('/wedding', requireAuth, ah(async (req, res) => {
       <meta charset="UTF-8">
       <meta name="viewport" content="width=device-width, initial-scale=1.0">
       <title>Wedding</title>
-      <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Cdefs%3E%3ClinearGradient id='goldGrad' x1='0%25' y1='0%25' x2='100%25' y2='100%25'%3E%3Cstop offset='0%25' style='stop-color:%23d4af37;stop-opacity:1' /%3E%3Cstop offset='100%25' style='stop-color:%23f4e4bc;stop-opacity:1' /%3E%3C/linearGradient%3E%3C/defs%3E%3Ccircle cx='50' cy='50' r='45' fill='url(%23goldGrad)'/%3E%3C/svg%3E">
+      <link rel="icon" type="image/png" href="/favicon.png">
       <link rel="preconnect" href="https://fonts.googleapis.com">
       <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
       <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;700&family=Lato:wght@300;400&display=swap" rel="stylesheet">
@@ -192,38 +236,17 @@ app.get('/wedding', requireAuth, ah(async (req, res) => {
           color: #333;
           margin-bottom: 20px;
         }
-        .date-location {
-          font-size: clamp(16px, 4vw, 24px);
-          font-weight: 400;
-          color: #666;
-          letter-spacing: 1px;
+        .event-info {
+          width: 100%;
+          max-width: 480px;
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          gap: 10px;
         }
-        .date-location:first-of-type {
-          margin-bottom: 4px;
-        }
-        .address-link {
-          display: inline-block;
-          max-width: 280px;
-          margin-top: 44px;
+        #rsvp-trigger {
+          margin-top: 16px;
           margin-bottom: 50px;
-          padding: 14px 44px;
-          font-family: 'Lato', sans-serif;
-          font-size: 18px;
-          font-weight: 400;
-          letter-spacing: 2px;
-          text-transform: uppercase;
-          color: white;
-          text-decoration: none;
-          text-align: center;
-          background: #333;
-          border: 1px solid #333;
-          cursor: pointer;
-          transition: color 0.2s, border-color 0.2s, background 0.2s;
-        }
-        .address-link:hover {
-          color: white;
-          background: #555;
-          border-color: #555;
         }
         img {
           max-width: min(80%, 600px);
@@ -271,19 +294,69 @@ app.get('/wedding', requireAuth, ah(async (req, res) => {
         .rsvp .friday-block { border-top: 1px solid #e0e0e0; padding-top: 16px; margin-top: 4px; }
         .rsvp .event-header { font-size: 11px; letter-spacing: 1.5px; text-transform: uppercase; color: #999; }
         .rsvp .success { font-size: 22px; text-align: center; color: #333; font-family: 'Playfair Display', serif; }
-        @media (max-width: 480px) {
+        .gifts {
+          width: 100%;
+          max-width: 480px;
+          margin-bottom: 50px;
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          gap: 20px;
+        }
+        .gifts h2, .event-info h2 {
+          font-size: clamp(16px, 4vw, 22px);
+          font-weight: 400;
+          letter-spacing: 3px;
+          color: #666;
+          text-transform: uppercase;
+          font-family: 'Playfair Display', serif;
+        }
+        .gifts p, .event-info p {
+          font-family: 'Playfair Display', serif;
+          font-size: 17px;
+          color: #666;
+          text-align: center;
+          line-height: 1.6;
+        }
+        .gifts .gift-buttons {
+          display: flex;
+          gap: 12px;
+          flex-wrap: wrap;
+          justify-content: center;
+        }
+        .gift-btn {
+          padding: 12px 28px;
+          font-family: 'Lato', sans-serif;
+          font-size: 14px;
+          letter-spacing: 1px;
+          text-transform: uppercase;
+          text-decoration: none;
+          border-radius: 6px;
+          cursor: pointer;
+          transition: background 0.2s, border-color 0.2s;
+        }
+        .gift-btn.primary {
+          background: #333;
+          color: white;
+          border: 1px solid #333;
+        }
+        .gift-btn.primary:hover { background: #555; border-color: #555; }
+@media (max-width: 480px) {
           body { padding: 32px 16px; }
           img { max-width: 100%; }
           .rsvp { max-width: 100%; }
+          .gifts { max-width: 100%; }
         }
       </style>
     </head>
     <body>
       <h1>WEDDING</h1>
-      <img src="/IMG_8784.JPG" alt="Wedding">
-      <div class="date-location">OCTOBER 10, 2026</div>
-      <div class="date-location">BROOKLYN, NY</div>
-      ${rsvpEnabled ? '<button class="address-link" id="rsvp-trigger" onclick="startRsvp()">RSVP</button>' : ''}
+      <img src="/Emma+Dain4.jpeg" alt="Wedding">
+      <div class="event-info">
+        <h2>October 10, 2026</h2>
+        <p>Ceremony, reception, and after-party at Warsaw &mdash; 261 Driggs Ave, Brooklyn, NY. Doors at 5pm.</p>
+      </div>
+      ${rsvpEnabled ? '<button class="gift-btn primary" id="rsvp-trigger" onclick="startRsvp()">RSVP</button>' : ''}
 
       <div class="rsvp" id="rsvp-section" hidden>
         <div class="stage" id="stage-search">
@@ -410,6 +483,27 @@ app.get('/wedding', requireAuth, ah(async (req, res) => {
           showStage('success');
         }
       </script>
+
+      ${giftsEnabled ? `
+      <div class="gifts">
+        <h2>Registry</h2>
+        <p>We're so excited to celebrate with you. If you'd like to give a gift, we're building a little fund for our future — anything is more than generous.</p>
+        <div class="gift-buttons">
+          <a href="${STRIPE_LINK || '#'}" class="gift-btn primary" target="_blank" rel="noopener">Credit card</a>
+          <a href="${VENMO_HANDLE ? `https://venmo.com/?txn=pay&recipients=${VENMO_HANDLE}&note=Wedding%20Gift` : '#'}" class="gift-btn primary" target="_blank" rel="noopener">Venmo</a>
+        </div>
+      </div>
+      ` : ''}
+
+      ${hotelEnabled ? `
+      <div class="gifts">
+        <h2>Hotel</h2>
+        <p>Brooklyn has no shortage of great places to stay, but if you'd like a small discount and to be close to the venue, The Coda has held a block of rooms for our guests.</p>
+        <div class="gift-buttons">
+          <a href="${HOTEL_LINK || '#'}" class="gift-btn primary" target="_blank" rel="noopener">Reserve a room</a>
+        </div>
+      </div>
+      ` : ''}
     </body>
     </html>
   `);
@@ -446,9 +540,27 @@ app.post('/admin/settings/rsvp-toggle', requireAdmin, ah(async (req, res) => {
   res.redirect('/admin');
 }));
 
+app.post('/admin/settings/gifts-toggle', requireAdmin, ah(async (req, res) => {
+  const current = await db.get(`SELECT value FROM settings WHERE key = 'gifts_enabled'`);
+  const next = current?.value === '1' ? '0' : '1';
+  await db.run(`UPDATE settings SET value = ? WHERE key = 'gifts_enabled'`, [next]);
+  res.redirect('/admin');
+}));
+
+app.post('/admin/settings/hotel-toggle', requireAdmin, ah(async (req, res) => {
+  const current = await db.get(`SELECT value FROM settings WHERE key = 'hotel_enabled'`);
+  const next = current?.value === '1' ? '0' : '1';
+  await db.run(`UPDATE settings SET value = ? WHERE key = 'hotel_enabled'`, [next]);
+  res.redirect('/admin');
+}));
+
 app.get('/admin', requireAdmin, ah(async (req, res) => {
   const setting = await db.get(`SELECT value FROM settings WHERE key = 'rsvp_enabled'`);
   const rsvpEnabled = setting?.value === '1';
+  const giftsSetting = await db.get(`SELECT value FROM settings WHERE key = 'gifts_enabled'`);
+  const giftsEnabled = giftsSetting?.value === '1';
+  const hotelSetting = await db.get(`SELECT value FROM settings WHERE key = 'hotel_enabled'`);
+  const hotelEnabled = hotelSetting?.value === '1';
   const guests = (await db.all('SELECT * FROM rsvp')).sort((a, b) =>
     a.full_name.localeCompare(b.full_name, undefined, { sensitivity: 'base' })
   );
@@ -513,7 +625,7 @@ app.get('/admin', requireAdmin, ah(async (req, res) => {
       <meta charset="UTF-8">
       <meta name="viewport" content="width=device-width, initial-scale=1.0">
       <title>Guest Admin</title>
-      <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Cdefs%3E%3ClinearGradient id='goldGrad' x1='0%25' y1='0%25' x2='100%25' y2='100%25'%3E%3Cstop offset='0%25' style='stop-color:%23d4af37;stop-opacity:1' /%3E%3Cstop offset='100%25' style='stop-color:%23f4e4bc;stop-opacity:1' /%3E%3C/linearGradient%3E%3C/defs%3E%3Ccircle cx='50' cy='50' r='45' fill='url(%23goldGrad)'/%3E%3Ctext x='50' y='50' text-anchor='middle' dominant-baseline='central' font-family='serif' font-size='52' font-weight='bold' fill='%234a2c00'%3EA%3C/text%3E%3C/svg%3E">
+      <link rel="icon" type="image/png" href="/favicon.png">
       <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; padding: 40px; background: #f9f9f9; color: #333; }
@@ -559,6 +671,16 @@ app.get('/admin', requireAdmin, ah(async (req, res) => {
           <form method="POST" action="/admin/settings/rsvp-toggle">
             <button type="submit" class="rsvp-toggle${rsvpEnabled ? ' on' : ''}">
               RSVP ${rsvpEnabled ? 'Visible' : 'Hidden'}
+            </button>
+          </form>
+          <form method="POST" action="/admin/settings/gifts-toggle">
+            <button type="submit" class="rsvp-toggle${giftsEnabled ? ' on' : ''}">
+              Gifts ${giftsEnabled ? 'Visible' : 'Hidden'}
+            </button>
+          </form>
+          <form method="POST" action="/admin/settings/hotel-toggle">
+            <button type="submit" class="rsvp-toggle${hotelEnabled ? ' on' : ''}">
+              Hotel ${hotelEnabled ? 'Visible' : 'Hidden'}
             </button>
           </form>
           <a href="/admin/export.csv" class="export-btn">Export CSV</a>

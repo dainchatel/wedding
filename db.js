@@ -75,6 +75,8 @@ if (process.env.DATABASE_URL) {
       )
     `);
     await pool.query(`INSERT INTO settings (key, value) VALUES ('rsvp_enabled', '0') ON CONFLICT DO NOTHING`);
+    await pool.query(`INSERT INTO settings (key, value) VALUES ('gifts_enabled', '0') ON CONFLICT DO NOTHING`);
+    await pool.query(`INSERT INTO settings (key, value) VALUES ('hotel_enabled', '0') ON CONFLICT DO NOTHING`);
   })();
 } else {
   const Database = require('better-sqlite3');
@@ -101,6 +103,8 @@ if (process.env.DATABASE_URL) {
     )
   `);
   db.prepare(`INSERT OR IGNORE INTO settings (key, value) VALUES ('rsvp_enabled', '0')`).run();
+  db.prepare(`INSERT OR IGNORE INTO settings (key, value) VALUES ('gifts_enabled', '0')`).run();
+  db.prepare(`INSERT OR IGNORE INTO settings (key, value) VALUES ('hotel_enabled', '0')`).run();
 
   const sqliteFns = () => ({
     async get(sql, params = []) {
