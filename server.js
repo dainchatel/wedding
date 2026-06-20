@@ -10,12 +10,14 @@ app.set('trust proxy', 1);
 const PORT = process.env.PORT || 3000;
 const PASSWORD = process.env.WEDDING_PASSWORD || 'changeme';
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'admin';
-const STRIPE_LINK = process.env.STRIPE_LINK || '';
+const REGISTRY_LINK = process.env.REGISTRY_LINK || 'https://withjoy.com/emmadain/registry?utm_medium=web&utm_source=joy&utm_campaign=registry_help_links';
 const VENMO_HANDLE = (process.env.VENMO_HANDLE || '').replace('@', '');
-const HOTEL_LINK = process.env.HOTEL_LINK || '';
+const HOTEL_LINK = process.env.HOTEL_LINK || 'https://www.codahotels.com/?selfbook=true&hotel=56194&startDate=2026-10-09&endDate=2026-10-11&promo=PATTIZCHATEL';
 const ACCESS_TOKEN = process.env.ACCESS_TOKEN || '';
 
-app.use(express.urlencoded({ extended: true }));
+// parameterLimit raised so the admin "Save All" form (≈7 fields/guest) doesn't
+// 413 on large guest lists; default is 1000 (~143 guests).
+app.use(express.urlencoded({ extended: true, limit: '10mb', parameterLimit: 100000 }));
 app.use(express.json());
 
 // Redirect HTTP to HTTPS in production
@@ -294,6 +296,8 @@ app.get('/wedding', requireAuth, ah(async (req, res) => {
         .rsvp .event-block { display: flex; flex-direction: column; gap: 12px; }
         .rsvp .friday-block { border-top: 1px solid #e0e0e0; padding-top: 16px; margin-top: 4px; }
         .rsvp .event-header { font-size: 11px; letter-spacing: 1.5px; text-transform: uppercase; color: #999; }
+        .rsvp .friday-info { border: 1px solid #eee; border-radius: 6px; padding: 14px 16px; background: #fafafa; display: flex; flex-direction: column; gap: 6px; }
+        .rsvp .friday-info p { font-size: 14px; text-align: left; margin: 0; color: #555; line-height: 1.5; }
         .rsvp .success { font-size: 22px; text-align: center; color: #333; font-family: 'Playfair Display', serif; }
         .gifts {
           width: 100%;
@@ -352,7 +356,7 @@ app.get('/wedding', requireAuth, ah(async (req, res) => {
     </head>
     <body>
       <h1>WEDDING</h1>
-      <img src="/Emma+Dain4.jpeg" alt="Wedding">
+      <img src="/IMG_8784.JPG" alt="Wedding">
       <div class="event-info">
         <h2>October 10, 2026</h2>
         <p>Ceremony, reception, and after-party at Warsaw &mdash; 261 Driggs Ave, Brooklyn, NY. Doors at 5pm.</p>
@@ -362,7 +366,7 @@ app.get('/wedding', requireAuth, ah(async (req, res) => {
       <div class="rsvp" id="rsvp-section" hidden>
         <div class="stage" id="stage-search">
           <form onsubmit="searchRsvp(event)">
-            <label>Enter your full name or email</label>
+            <label>Enter your name or email</label>
             <input id="rsvp-query" name="query" required autocomplete="off">
             <button type="submit">Look up</button>
           </form>
@@ -429,7 +433,7 @@ app.get('/wedding', requireAuth, ah(async (req, res) => {
           const firstName = escapeHtml(p.full_name.split(' ')[0]);
           let html = '<fieldset><legend>' + escapeHtml(p.full_name) + '</legend>'
             + '<div class="event-block">'
-            + '<div class="event-header">Saturday, October 10 \u2014 The Wedding</div>'
+            + '<div class="event-header">Saturday, October 10 \u00b7 The Wedding</div>'
             + '<label>Will ' + firstName + ' attend?'
             + '<select name="' + prefix + '-attending" required>'
             + '<option value="">--</option>'
@@ -440,7 +444,7 @@ app.get('/wedding', requireAuth, ah(async (req, res) => {
             + '</div>';
           if (p.friday_invite) {
             html += '<div class="event-block friday-block">'
-              + '<div class="event-header">Friday, October 9 \u2014 Welcome Party</div>'
+              + '<div class="event-header">Friday, October 9 \u00b7 Welcome Party</div>'
               + '<label>Will ' + firstName + ' attend?'
               + '<select name="' + prefix + '-friday-attending">'
               + '<option value="">--</option>'
@@ -454,7 +458,14 @@ app.get('/wedding', requireAuth, ah(async (req, res) => {
         }
         function renderForm({ primary, linked }) {
           const c = document.getElementById('stage-form');
+          // Friday details only shown to guests with a Friday invite (gated server-side per guest record)
+          const fridayInvited = primary.friday_invite || (linked && linked.friday_invite);
+          const fridayInfo = fridayInvited
+            ? '<div class="friday-info"><div class="event-header">Friday, October 9 · Welcome Party</div>'
+              + '<p>Join us for tapas and wine at The Ten Bells, 247 Broome St, Manhattan. Starts at 5:30pm.</p></div>'
+            : '';
           c.innerHTML = '<form onsubmit="submitRsvp(event)">'
+            + fridayInfo
             + personHtml(primary, 'p')
             + (linked ? personHtml(linked, 'l') : '')
             + '<button type="submit">Submit RSVP</button></form>';
@@ -485,12 +496,17 @@ app.get('/wedding', requireAuth, ah(async (req, res) => {
         }
       </script>
 
+      <div class="gifts">
+        <h2>Open House</h2>
+        <p>Sunday, October 11, from 10:30am on. On your way out of town, swing by our place for bagels and coffee. Everyone&rsquo;s welcome. 27 MacDonough St., Apt 1, Brooklyn.</p>
+      </div>
+
       ${giftsEnabled ? `
       <div class="gifts">
         <h2>Registry</h2>
-        <p>We're so excited to celebrate with you. If you'd like to give a gift, we're building a little fund for our future — anything is more than generous.</p>
+        <p>We're so excited to celebrate with you. If you'd like to give a gift, we're building a little fund for our future. Anything is more than generous.</p>
         <div class="gift-buttons">
-          <a href="${STRIPE_LINK || '#'}" class="gift-btn primary" target="_blank" rel="noopener">Credit card</a>
+          <a href="${REGISTRY_LINK || '#'}" class="gift-btn primary" target="_blank" rel="noopener">Credit card</a>
           <a href="${VENMO_HANDLE ? `https://venmo.com/?txn=pay&recipients=${VENMO_HANDLE}&note=Wedding%20Gift` : '#'}" class="gift-btn primary" target="_blank" rel="noopener">Venmo</a>
         </div>
       </div>
@@ -499,7 +515,7 @@ app.get('/wedding', requireAuth, ah(async (req, res) => {
       ${hotelEnabled ? `
       <div class="gifts">
         <h2>Hotel</h2>
-        <p>Brooklyn has no shortage of great places to stay, but if you'd like a small discount and to be close to the venue, The Coda has held a block of rooms for our guests.</p>
+        <p>Brooklyn has no shortage of great places to stay, but if you'd like a small discount and to be close to the venue, The Coda has held a block of rooms for our guests. The discount is applied automatically when you book through the link below, or enter code <strong>PATTIZCHATEL</strong>.</p>
         <div class="gift-buttons">
           <a href="${HOTEL_LINK || '#'}" class="gift-btn primary" target="_blank" rel="noopener">Reserve a room</a>
         </div>
@@ -867,25 +883,38 @@ app.post('/api/rsvp/search', requireAuth, ah(async (req, res) => {
   if (!query) return res.json({ matches: [] });
   const guests = await db.all('SELECT id, full_name, email FROM rsvp');
 
+  // 1. Exact email match wins outright.
   const emailMatch = guests.find(g => g.email && normalize(g.email) === query);
   if (emailMatch) {
     return res.json({ matches: [{ id: emailMatch.id, full_name: emailMatch.full_name }] });
   }
 
-  const exact = guests.filter(g => normalize(g.full_name) === query);
-  if (exact.length) {
-    return res.json({ matches: exact.map(g => ({ id: g.id, full_name: g.full_name })) });
-  }
+  // Match on name parts so a first name, last name, or partial works — not just
+  // the full string. Tier each guest (lower = better) and return the best tier:
+  //   0 = exact full name
+  //   1 = every typed word is the start of one of the name's words
+  //   2 = every typed word is a near-typo (small edit distance) of a name word
+  const qTokens = query.split(' ').filter(Boolean);
+  const nameTokensOf = (g) => normalize(g.full_name).split(' ').filter(Boolean);
+  const fuzzyOk = (nameTok, qTok) => levenshtein(nameTok, qTok) <= (qTok.length <= 4 ? 1 : 2);
 
-  const fuzzy = guests
-    .map(g => ({ g, d: levenshtein(normalize(g.full_name), query) }))
-    .filter(x => x.d <= 2)
-    .sort((a, b) => a.d - b.d);
+  const tierOf = (g) => {
+    if (normalize(g.full_name) === query) return 0;
+    const nameTokens = nameTokensOf(g);
+    if (qTokens.every(qt => nameTokens.some(nt => nt.startsWith(qt)))) return 1;
+    if (qTokens.every(qt => nameTokens.some(nt => fuzzyOk(nt, qt)))) return 2;
+    return Infinity;
+  };
 
-  if (!fuzzy.length) return res.json({ matches: [] });
-  const best = fuzzy[0].d;
+  const ranked = guests
+    .map(g => ({ g, tier: tierOf(g) }))
+    .filter(x => x.tier !== Infinity)
+    .sort((a, b) => a.tier - b.tier || a.g.full_name.localeCompare(b.g.full_name));
+
+  if (!ranked.length) return res.json({ matches: [] });
+  const best = ranked[0].tier;
   return res.json({
-    matches: fuzzy.filter(x => x.d === best).map(x => ({ id: x.g.id, full_name: x.g.full_name }))
+    matches: ranked.filter(x => x.tier === best).map(x => ({ id: x.g.id, full_name: x.g.full_name }))
   });
 }));
 
