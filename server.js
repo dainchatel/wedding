@@ -1,6 +1,7 @@
 require('dotenv').config();
 const express = require('express');
 const session = require('express-session');
+const nodemailer = require('nodemailer');
 const db = require('./db');
 const app = express();
 
@@ -14,6 +15,15 @@ const REGISTRY_LINK = process.env.REGISTRY_LINK || 'https://withjoy.com/emmadain
 const VENMO_HANDLE = (process.env.VENMO_HANDLE || '').replace('@', '');
 const HOTEL_LINK = process.env.HOTEL_LINK || 'https://www.codahotels.com/?selfbook=true&hotel=56194&startDate=2026-10-09&endDate=2026-10-11&promo=PATTIZCHATEL';
 const ACCESS_TOKEN = process.env.ACCESS_TOKEN || '';
+
+// RSVP email notifications via Gmail SMTP. Fully optional: if these env vars
+// aren't set, notifications are silently skipped and RSVPs still work normally.
+const GMAIL_USER = process.env.GMAIL_USER || '';
+const GMAIL_APP_PASSWORD = process.env.GMAIL_APP_PASSWORD || '';
+const NOTIFY_TO = process.env.NOTIFY_TO || GMAIL_USER;
+const mailer = (GMAIL_USER && GMAIL_APP_PASSWORD)
+  ? nodemailer.createTransport({ service: 'gmail', auth: { user: GMAIL_USER, pass: GMAIL_APP_PASSWORD } })
+  : null;
 
 // parameterLimit raised so the admin "Save All" form (≈7 fields/guest) doesn't
 // 413 on large guest lists; default is 1000 (~143 guests).
@@ -935,6 +945,38 @@ app.get('/api/rsvp/:id', requireAuth, ah(async (req, res) => {
   res.json({ primary, linked });
 }));
 
+// Build a plain-text summary email from the stored RSVP rows (pure + testable).
+function buildRsvpEmail(rows) {
+  const fmt = (v) => (v === 1 ? 'Yes' : v === 0 ? 'No' : 'No response');
+  const blocks = rows.map((r) => {
+    const lines = [`• ${r.full_name}`, `   Wedding (Sat, Oct 10): ${fmt(r.attending)}`];
+    if (r.dietary_restrictions) lines.push(`   Dietary: ${r.dietary_restrictions}`);
+    if (r.friday_invite) lines.push(`   Friday welcome party (Oct 9): ${fmt(r.friday_attending)}`);
+    return lines.join('\n');
+  });
+  const names = rows.map((r) => r.full_name).join(' & ');
+  return {
+    subject: `RSVP: ${names}`,
+    text: `New RSVP received:\n\n${blocks.join('\n\n')}\n\n— emmadain.com`,
+  };
+}
+
+// Fire-and-forget: emails a backup copy of each RSVP. Never throws into the request.
+async function notifyRsvp(ids) {
+  if (!mailer || !NOTIFY_TO) return;
+  const rows = [];
+  for (const id of ids) {
+    const r = await db.get(
+      'SELECT full_name, attending, dietary_restrictions, friday_invite, friday_attending FROM rsvp WHERE id = ?',
+      [id]
+    );
+    if (r) rows.push(r);
+  }
+  if (!rows.length) return;
+  const { subject, text } = buildRsvpEmail(rows);
+  await mailer.sendMail({ from: `Wedding RSVPs <${GMAIL_USER}>`, to: NOTIFY_TO, subject, text });
+}
+
 app.post('/api/rsvp/submit', requireAuth, ah(async (req, res) => {
   const { entries } = req.body;
   if (!Array.isArray(entries) || !entries.length) {
@@ -950,6 +992,11 @@ app.post('/api/rsvp/submit', requireAuth, ah(async (req, res) => {
       );
     }
   });
+
+  // Backup notification — fire-and-forget so a mail failure never affects the RSVP.
+  const ids = entries.map((e) => Number(e.id)).filter(Number.isFinite);
+  notifyRsvp(ids).catch((err) => console.error('RSVP notify failed:', err.message));
+
   res.json({ ok: true });
 }));
 
