@@ -16,12 +16,24 @@ if (process.env.DATABASE_URL) {
     connectionString: process.env.DATABASE_URL,
     ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
     max: 5,
-    keepAlive: true,                    // keep idle connections healthy to reduce stale-connection hangs
+    min: 1,                             // ask the pool to keep one client established at all times
+    keepAlive: true,
     keepAliveInitialDelayMillis: 10000,
-    connectionTimeoutMillis: 10000,     // don't wait forever for a connection, but stay lenient
-    query_timeout: 15000,               // bound a stuck query rather than hang to Heroku's 30s cutoff
-    statement_timeout: 15000,
+    idleTimeoutMillis: 60000,           // hold idle clients open between sparse visits so we reuse them
+    connectionTimeoutMillis: 4000,      // fail a cold connect fast so a retry still fits the 30s budget
+    query_timeout: 10000,
+    statement_timeout: 10000,
   });
+
+  // The actual cause of the intermittent 500s: on a low-traffic site the pool drains to zero
+  // between visitors, so the next request pays full Postgres connection-setup latency — which on
+  // Heroku intermittently exceeds connectionTimeoutMillis and throws "Connection terminated".
+  // A cheap periodic ping keeps one connection live and warm, so requests reuse it (~80ms) instead
+  // of cold-connecting (~5s, or a 10s timeout). unref() so it never holds the process open.
+  const keepalive = setInterval(() => {
+    pool.query('SELECT 1').catch((err) => console.error('keepalive ping failed:', err.message));
+  }, 50000);
+  keepalive.unref();
 
   // An idle client can error in the background (network blip, backend restart). Without a
   // handler on the pool, Node would crash the dyno; log it and let the pool drop the client.
@@ -44,12 +56,50 @@ if (process.env.DATABASE_URL) {
     },
   });
 
+  // Heroku recycles idle Postgres connections and cold connects can briefly exceed
+  // connectionTimeoutMillis. These failures are transient and safe to retry, because no
+  // statement has been sent yet — so a second attempt usually lands on a warm/fresh client.
+  const isTransient = (err) => {
+    const m = (err && err.message) || '';
+    return /Connection terminated|connection timeout|timeout exceeded|ECONNRESET|ETIMEDOUT|terminating connection|Client has encountered a connection error/i.test(m);
+  };
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  async function withRetry(fn, attempts = 3) {
+    let lastErr;
+    for (let i = 0; i < attempts; i++) {
+      try {
+        return await fn();
+      } catch (err) {
+        lastErr = err;
+        if (!isTransient(err) || i === attempts - 1) throw err;
+        await sleep(150 * (i + 1));
+      }
+    }
+    throw lastErr;
+  }
+
   // Reads/writes go through pool.query, which acquires AND releases a connection
-  // automatically — no manual checkout to leak. Transactions get one dedicated client.
+  // automatically — no manual checkout to leak. Each is wrapped in withRetry so a single
+  // dropped/cold connection becomes a quick retry instead of a 500. Transactions get one
+  // dedicated client; we retry only the checkout, never the in-flight statements.
+  const poolQuery = (sql, params) => withRetry(() => pool.query(toPositional(sql), params));
   adapter = {
-    ...pgFns(pool),
+    async get(sql, params = []) {
+      const { rows } = await poolQuery(sql, params);
+      return rows[0] ?? null;
+    },
+    async all(sql, params = []) {
+      const { rows } = await poolQuery(sql, params);
+      return rows;
+    },
+    async run(sql, params = []) {
+      await poolQuery(sql, params);
+    },
+    async exec(sql) {
+      await withRetry(() => pool.query(sql));
+    },
     async transaction(fn) {
-      const client = await pool.connect();
+      const client = await withRetry(() => pool.connect());
       try {
         await client.query('BEGIN');
         await fn(pgFns(client));
