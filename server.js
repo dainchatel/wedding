@@ -431,7 +431,7 @@ app.get('/wedding', requireAuth, ah(async (req, res) => {
           }
           c.innerHTML = '<p>Multiple matches found. Please pick:</p><div class="actions">'
             + matches.map(m => '<button onclick="loadRsvp(' + m.id + ')">' + escapeHtml(m.full_name) + '</button>').join('')
-            + '</div><button class="secondary" onclick="showStage(\\'search\\')">Search again</button>';
+            + '</div><div class="actions" style="margin-top:12px"><button class="secondary" onclick="showStage(\\'search\\')">Search again</button></div>';
         }
         async function loadRsvp(id) {
           const r = await fetch('/api/rsvp/' + id);
