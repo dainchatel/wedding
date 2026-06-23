@@ -208,12 +208,11 @@ app.get('/access', (req, res) => {
 
 // Protected wedding page
 app.get('/wedding', requireAuth, ah(async (req, res) => {
-  // One round-trip instead of three — less DB work on the guest-facing page.
-  const settings = await db.all(`SELECT key, value FROM settings`);
-  const flag = (k) => settings.find((s) => s.key === k)?.value === '1';
-  const rsvpEnabled = flag('rsvp_enabled');
-  const giftsEnabled = flag('gifts_enabled');
-  const hotelEnabled = flag('hotel_enabled');
+  // We're live — every module is on, hardcoded. No settings/DB read on the guest path, so a
+  // Postgres blip can't take this page down. To hide a module, flip its constant and push (~90s).
+  const rsvpEnabled = true;
+  const giftsEnabled = true;
+  const hotelEnabled = true;
   res.send(`
     <!DOCTYPE html>
     <html lang="en">
@@ -560,34 +559,7 @@ const parseCsv = (text) => {
 };
 
 // Admin routes
-app.post('/admin/settings/rsvp-toggle', requireAdmin, ah(async (req, res) => {
-  const current = await db.get(`SELECT value FROM settings WHERE key = 'rsvp_enabled'`);
-  const next = current?.value === '1' ? '0' : '1';
-  await db.run(`UPDATE settings SET value = ? WHERE key = 'rsvp_enabled'`, [next]);
-  res.redirect('/admin');
-}));
-
-app.post('/admin/settings/gifts-toggle', requireAdmin, ah(async (req, res) => {
-  const current = await db.get(`SELECT value FROM settings WHERE key = 'gifts_enabled'`);
-  const next = current?.value === '1' ? '0' : '1';
-  await db.run(`UPDATE settings SET value = ? WHERE key = 'gifts_enabled'`, [next]);
-  res.redirect('/admin');
-}));
-
-app.post('/admin/settings/hotel-toggle', requireAdmin, ah(async (req, res) => {
-  const current = await db.get(`SELECT value FROM settings WHERE key = 'hotel_enabled'`);
-  const next = current?.value === '1' ? '0' : '1';
-  await db.run(`UPDATE settings SET value = ? WHERE key = 'hotel_enabled'`, [next]);
-  res.redirect('/admin');
-}));
-
 app.get('/admin', requireAdmin, ah(async (req, res) => {
-  const setting = await db.get(`SELECT value FROM settings WHERE key = 'rsvp_enabled'`);
-  const rsvpEnabled = setting?.value === '1';
-  const giftsSetting = await db.get(`SELECT value FROM settings WHERE key = 'gifts_enabled'`);
-  const giftsEnabled = giftsSetting?.value === '1';
-  const hotelSetting = await db.get(`SELECT value FROM settings WHERE key = 'hotel_enabled'`);
-  const hotelEnabled = hotelSetting?.value === '1';
   const guests = (await db.all('SELECT * FROM rsvp')).sort((a, b) =>
     a.full_name.localeCompare(b.full_name, undefined, { sensitivity: 'base' })
   );
@@ -681,9 +653,6 @@ app.get('/admin', requireAdmin, ah(async (req, res) => {
         .top-actions { display: flex; gap: 8px; align-self: center; }
         .export-btn { padding: 8px 14px; font-size: 13px; background: #333; color: white; border: none; border-radius: 4px; cursor: pointer; text-decoration: none; white-space: nowrap; }
         .export-btn:hover { background: #555; }
-        .rsvp-toggle { padding: 8px 14px; font-size: 13px; border-radius: 4px; cursor: pointer; white-space: nowrap; border: 1px solid #ccc; background: white; color: #666; }
-        .rsvp-toggle.on { background: #e6f4ea; color: #2e7d32; border-color: #a5d6a7; }
-        .rsvp-toggle:hover { opacity: 0.85; }
       </style>
     </head>
     <body>
@@ -695,21 +664,6 @@ app.get('/admin', requireAdmin, ah(async (req, res) => {
           <div class="count">${guests.length} guest${guests.length !== 1 ? 's' : ''}</div>
         </div>
         <div class="top-actions">
-          <form method="POST" action="/admin/settings/rsvp-toggle">
-            <button type="submit" class="rsvp-toggle${rsvpEnabled ? ' on' : ''}">
-              RSVP ${rsvpEnabled ? 'Visible' : 'Hidden'}
-            </button>
-          </form>
-          <form method="POST" action="/admin/settings/gifts-toggle">
-            <button type="submit" class="rsvp-toggle${giftsEnabled ? ' on' : ''}">
-              Gifts ${giftsEnabled ? 'Visible' : 'Hidden'}
-            </button>
-          </form>
-          <form method="POST" action="/admin/settings/hotel-toggle">
-            <button type="submit" class="rsvp-toggle${hotelEnabled ? ' on' : ''}">
-              Hotel ${hotelEnabled ? 'Visible' : 'Hidden'}
-            </button>
-          </form>
           <a href="/admin/export.csv" class="export-btn">Export CSV</a>
         </div>
       </div>
