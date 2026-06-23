@@ -20,7 +20,7 @@ if (process.env.DATABASE_URL) {
     keepAlive: true,
     keepAliveInitialDelayMillis: 10000,
     idleTimeoutMillis: 60000,           // hold idle clients open between sparse visits so we reuse them
-    connectionTimeoutMillis: 4000,      // fail a cold connect fast so a retry still fits the 30s budget
+    connectionTimeoutMillis: 6000,      // bound a cold connect; retries (boot + requests) still fit 30s
     query_timeout: 10000,
     statement_timeout: 10000,
   });
@@ -113,7 +113,12 @@ if (process.env.DATABASE_URL) {
     },
   };
 
-  ready = (async () => {
+  // Schema setup is retried and NON-FATAL. A transient DB blip at boot must never crash the
+  // dyno — that turns a brief Postgres hiccup into a whole-site crash-loop (H10). The guest page
+  // needs no DB, so the server boots regardless (see server.js); this only ensures the schema
+  // exists for RSVP writes once Postgres is reachable. Every statement is idempotent, so retrying
+  // — and re-running on the next boot if it fails — is safe.
+  ready = withRetry(async () => {
     await pool.query(`DROP TABLE IF EXISTS rsvps`);
     await pool.query(`
       CREATE TABLE IF NOT EXISTS rsvp (
@@ -139,7 +144,9 @@ if (process.env.DATABASE_URL) {
     await pool.query(`INSERT INTO settings (key, value) VALUES ('rsvp_enabled', '0') ON CONFLICT DO NOTHING`);
     await pool.query(`INSERT INTO settings (key, value) VALUES ('gifts_enabled', '0') ON CONFLICT DO NOTHING`);
     await pool.query(`INSERT INTO settings (key, value) VALUES ('hotel_enabled', '0') ON CONFLICT DO NOTHING`);
-  })();
+  }).catch((err) => {
+    console.error('DB schema init failed (continuing; site does not depend on it):', err.message);
+  });
 } else {
   const Database = require('better-sqlite3');
   const db = new Database(path.join(__dirname, 'wedding.db'));
