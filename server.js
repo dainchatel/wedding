@@ -960,13 +960,11 @@ app.get('/logout', (req, res) => {
   res.redirect('/');
 });
 
-db.ready
-  .then(() => {
-    app.listen(PORT, () => {
-      console.log(`Server running on port ${PORT}`);
-    });
-  })
-  .catch((err) => {
-    console.error('Failed to initialize database:', err);
-    process.exit(1);
-  });
+// Boot the web server unconditionally. The guest page needs no database, so a transient Postgres
+// hiccup at boot must never crash the dyno — the old process.exit(1) here crash-looped the whole
+// site (H10). db.ready is non-fatal now (schema init retries and swallows its own errors); we
+// just log when it's done so a failed init is visible without taking the site down.
+app.listen(PORT, () => {
+  console.log(`Server running on port ${PORT}`);
+});
+db.ready.then(() => console.log('DB schema ready')).catch(() => {});
