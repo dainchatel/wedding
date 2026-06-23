@@ -208,12 +208,12 @@ app.get('/access', (req, res) => {
 
 // Protected wedding page
 app.get('/wedding', requireAuth, ah(async (req, res) => {
-  const setting = await db.get(`SELECT value FROM settings WHERE key = 'rsvp_enabled'`);
-  const rsvpEnabled = setting?.value === '1';
-  const giftsSetting = await db.get(`SELECT value FROM settings WHERE key = 'gifts_enabled'`);
-  const giftsEnabled = giftsSetting?.value === '1';
-  const hotelSetting = await db.get(`SELECT value FROM settings WHERE key = 'hotel_enabled'`);
-  const hotelEnabled = hotelSetting?.value === '1';
+  // One round-trip instead of three — less DB work on the guest-facing page.
+  const settings = await db.all(`SELECT key, value FROM settings`);
+  const flag = (k) => settings.find((s) => s.key === k)?.value === '1';
+  const rsvpEnabled = flag('rsvp_enabled');
+  const giftsEnabled = flag('gifts_enabled');
+  const hotelEnabled = flag('hotel_enabled');
   res.send(`
     <!DOCTYPE html>
     <html lang="en">
