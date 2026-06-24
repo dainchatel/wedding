@@ -368,7 +368,7 @@ app.get('/wedding', requireAuth, ah(async (req, res) => {
       <img src="/IMG_8784.JPG" alt="Wedding">
       <div class="event-info">
         <h2>October 10, 2026</h2>
-        <p>Ceremony, reception, and after-party at Warsaw &mdash; 261 Driggs Ave, Brooklyn, NY. Doors at 5pm.</p>
+        <p>Ceremony, reception, and after-party at Warsaw &mdash; 261 Driggs Ave, Brooklyn, NY. Doors at 5, ceremony at 5:30.</p>
       </div>
       ${rsvpEnabled ? '<button class="gift-btn primary" id="rsvp-trigger" onclick="startRsvp()">RSVP</button>' : ''}
 
@@ -507,7 +507,7 @@ app.get('/wedding', requireAuth, ah(async (req, res) => {
 
       <div class="gifts">
         <h2>Open House</h2>
-        <p>Sunday, October 11, from 10:30am on. On your way out of town, swing by our place for bagels and coffee. Everyone&rsquo;s welcome. 27 MacDonough St., Apt 1, Brooklyn.</p>
+        <p>Sunday, October 11, starting at 10:30am. On your way out of town, stop by our apartment for bagels and coffee. 27 MacDonough St., Apt 1, Brooklyn.</p>
       </div>
 
       ${giftsEnabled ? `
@@ -524,7 +524,7 @@ app.get('/wedding', requireAuth, ah(async (req, res) => {
       ${hotelEnabled ? `
       <div class="gifts">
         <h2>Hotel</h2>
-        <p>Brooklyn has no shortage of great places to stay, but if you'd like a small discount and to be close to the venue, The Coda has held a block of rooms for our guests. The discount is applied automatically when you book through the link below, or enter code <strong>PATTIZCHATEL</strong>.</p>
+        <p>Brooklyn has no shortage of great places to stay, but if you'd like a small discount and to be close to the venue, Coda Williamsburg has held a block of rooms for our guests. The discount is applied automatically when you book through the link below, or enter code <strong>PATTIZCHATEL</strong>.</p>
         <div class="gift-buttons">
           <a href="${HOTEL_LINK || '#'}" class="gift-btn primary" target="_blank" rel="noopener">Reserve a room</a>
         </div>
@@ -967,4 +967,4 @@ app.get('/logout', (req, res) => {
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
 });
-db.ready.then(() => console.log('DB schema ready')).catch(() => {});
+db.ready.then(() => console.log('DB schema ready')).catch(() => { });

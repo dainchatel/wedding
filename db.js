@@ -119,7 +119,6 @@ if (process.env.DATABASE_URL) {
   // exists for RSVP writes once Postgres is reachable. Every statement is idempotent, so retrying
   // — and re-running on the next boot if it fails — is safe.
   ready = withRetry(async () => {
-    await pool.query(`DROP TABLE IF EXISTS rsvps`);
     await pool.query(`
       CREATE TABLE IF NOT EXISTS rsvp (
         id SERIAL PRIMARY KEY,
@@ -151,7 +150,6 @@ if (process.env.DATABASE_URL) {
   const Database = require('better-sqlite3');
   const db = new Database(path.join(__dirname, 'wedding.db'));
 
-  db.exec(`DROP TABLE IF EXISTS rsvps`);
   db.exec(`
     CREATE TABLE IF NOT EXISTS rsvp (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
