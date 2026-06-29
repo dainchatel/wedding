@@ -565,6 +565,16 @@ app.get('/admin', requireAdmin, ah(async (req, res) => {
   );
 
   const sortedGuests = guests;
+
+  const total = guests.length;
+  const weddingYes = guests.filter(g => g.attending === 1).length;
+  const weddingNo = guests.filter(g => g.attending === 0).length;
+  const weddingResponded = weddingYes + weddingNo;
+  const fridayInvited = guests.filter(g => g.friday_invite).length;
+  const fridayYes = guests.filter(g => g.friday_invite && g.friday_attending === 1).length;
+  const fridayNo = guests.filter(g => g.friday_invite && g.friday_attending === 0).length;
+  const fridayResponded = fridayYes + fridayNo;
+
   const guestOptions = (currentId, selectedId) => sortedGuests
     .filter(g => g.id !== currentId)
     .map(g =>
@@ -653,6 +663,16 @@ app.get('/admin', requireAdmin, ah(async (req, res) => {
         .top-actions { display: flex; gap: 8px; align-self: center; }
         .export-btn { padding: 8px 14px; font-size: 13px; background: #333; color: white; border: none; border-radius: 4px; cursor: pointer; text-decoration: none; white-space: nowrap; }
         .export-btn:hover { background: #555; }
+        .stats { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 32px; }
+        .stat-group { background: white; border-radius: 8px; box-shadow: 0 1px 4px rgba(0,0,0,0.08); padding: 16px 20px; }
+        .stat-group h3 { font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; color: #888; margin-bottom: 14px; font-weight: 600; }
+        .stat-row { display: flex; gap: 28px; }
+        .stat { text-align: center; }
+        .stat .num { font-size: 28px; font-weight: 600; color: #333; line-height: 1; }
+        .stat .num .of { font-size: 16px; color: #bbb; font-weight: 400; }
+        .stat .num.yes { color: #2e7d32; }
+        .stat .num.no { color: #c62828; }
+        .stat .lbl { font-size: 11px; color: #999; margin-top: 6px; text-transform: uppercase; letter-spacing: 0.3px; }
       </style>
     </head>
     <body>
@@ -665,6 +685,26 @@ app.get('/admin', requireAdmin, ah(async (req, res) => {
         </div>
         <div class="top-actions">
           <a href="/admin/export.csv" class="export-btn">Export CSV</a>
+        </div>
+      </div>
+
+      <div class="stats">
+        <div class="stat-group">
+          <h3>Wedding (Saturday)</h3>
+          <div class="stat-row">
+            <div class="stat"><div class="num">${weddingResponded}<span class="of">/${total}</span></div><div class="lbl">Responded</div></div>
+            <div class="stat"><div class="num yes">${weddingYes}</div><div class="lbl">Yes</div></div>
+            <div class="stat"><div class="num no">${weddingNo}</div><div class="lbl">No</div></div>
+          </div>
+        </div>
+        <div class="stat-group">
+          <h3>Friday Welcome Party</h3>
+          <div class="stat-row">
+            <div class="stat"><div class="num">${fridayInvited}</div><div class="lbl">Invited</div></div>
+            <div class="stat"><div class="num">${fridayResponded}<span class="of">/${fridayInvited}</span></div><div class="lbl">Responded</div></div>
+            <div class="stat"><div class="num yes">${fridayYes}</div><div class="lbl">Yes</div></div>
+            <div class="stat"><div class="num no">${fridayNo}</div><div class="lbl">No</div></div>
+          </div>
         </div>
       </div>
 
